@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/midbel/cli"
+	"github.com/midbel/sizefmt"
 )
 
 const (
@@ -47,13 +48,29 @@ func runSplit(cmd *cli.Command, args []string) error {
 		*sleep = DefaultSleep
 	}
 	r := io.MultiReader(rs...)
+  var written, count int64
+  go func() {
+    var i, c int64
+    for range time.Tick(time.Second) {
+      i++
+      c += written
+
+      w := sizefmt.Format(float64(written), sizefmt.IEC)
+      t := sizefmt.Format(float64(c), sizefmt.IEC)
+      fmt.Printf("%04d: %d packets - %s (%s)\n", i, count, w, t)
+      written, count = 0, 0
+    }
+  }()
 	for {
 		if n, err := io.CopyN(w, r, int64(*size)); err != nil && n == 0 {
 			if err == io.EOF {
 				break
 			}
 			return err
-		}
+		} else {
+      written += n
+      count++
+    }
 		time.Sleep(*sleep)
 	}
 	return nil
