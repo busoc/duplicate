@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -13,6 +12,8 @@ import (
 	"github.com/midbel/toml"
 	"golang.org/x/sync/errgroup"
 )
+
+const DefaultBufferSize = 64 << 20
 
 func runRelay(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -30,6 +31,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 		Ifi     string `toml:"nic"`
 		Remotes []string
 		Delay   int
+		Buffer  int
 	}{}
 	if err := toml.NewDecoder(r).Decode(&c); err != nil {
 		return err
@@ -55,17 +57,23 @@ func runRelay(cmd *cli.Command, args []string) error {
 	if wc := io.MultiWriter(wc...); c.Delay <= 0 {
 		_, err = io.Copy(wc, rc)
 	} else {
-		pr, pw, err := os.Pipe()
-		if err != nil {
-			return err
+		// pr, pw, err := os.Pipe()
+		// if err != nil {
+		// 	return err
+		// }
+		// defer func() {
+		// 	pr.Close()
+		// 	pw.Close()
+		// }()
+		if c.Buffer <= 0 {
+			c.Buffer = DefaultBufferSize
 		}
-		defer func() {
-			pr.Close()
-			pw.Close()
-		}()
-		var grp errgroup.Group
-		grp.Go(writeToPipe(rc, pw))
-		grp.Go(readFromPipe(pr, wc, c.Delay))
+		var (
+			grp errgroup.Group
+			rwg = NewRingSize(c.Buffer)
+		)
+		grp.Go(writeToPipe(rc, rwg))
+		grp.Go(readFromPipe(rwg, wc, c.Delay))
 		err = grp.Wait()
 	}
 	return err
@@ -92,23 +100,18 @@ func readFromPipe(r io.Reader, w io.Writer, delta int) func() error {
 			size    uint32
 			count   uint32
 			elapsed time.Duration
-			rs      = bufio.NewReaderSize(r, 4096)
 		)
 		for {
-			if _, err := rs.Peek(4); err != nil {
-				time.Sleep(time.Second)
-				continue
-			}
-			binary.Read(rs, binary.BigEndian, &size)
-			binary.Read(rs, binary.BigEndian, &count)
-			binary.Read(rs, binary.BigEndian, &elapsed)
+			binary.Read(r, binary.BigEndian, &size)
+			binary.Read(r, binary.BigEndian, &count)
+			binary.Read(r, binary.BigEndian, &elapsed)
 
 			if elapsed > 0 {
 				time.Sleep(elapsed)
 			} else {
 				time.Sleep(time.Duration(delta) * time.Second)
 			}
-			if _, err := io.CopyN(w, rs, int64(size)-int64(MetaLen)); err != nil {
+			if _, err := io.CopyN(w, r, int64(size)-int64(MetaLen)); err != nil {
 				return err
 			}
 		}

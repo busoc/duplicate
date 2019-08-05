@@ -17,13 +17,27 @@ const (
 )
 
 func runSplit(cmd *cli.Command, args []string) error {
-	sleep := cmd.Flag.Duration("i", DefaultSleep, "interval")
-	size := cmd.Flag.Int("s", DefaultSize, "packet size")
+	var (
+		sleep = cmd.Flag.Duration("i", DefaultSleep, "interval")
+		size  = cmd.Flag.Int("s", DefaultSize, "packet size")
+		limit = cmd.Flag.Int("n", 0, "packets count")
+		delay = cmd.Flag.Duration("d", 0, "timeout")
+	)
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
 	w, err := net.Dial("udp", cmd.Flag.Arg(0))
 	if err != nil {
+		return err
+	}
+	if *delay < 0 {
+		*delay = 0
+	}
+	var now time.Time
+	if *delay > 0 {
+		now = now.Add(*delay)
+	}
+	if err := w.SetDeadline(now); err != nil {
 		return err
 	}
 	defer w.Close()
@@ -48,29 +62,30 @@ func runSplit(cmd *cli.Command, args []string) error {
 		*sleep = DefaultSleep
 	}
 	r := io.MultiReader(rs...)
-  var written, count int64
-  go func() {
-    var i, c int64
-    for range time.Tick(time.Second) {
-      i++
-      c += written
+	var written, count int64
+	go func() {
+		var i, c, n int64
+		for range time.Tick(time.Second) {
+			i++
+			c += written
+			n += count
 
-      w := sizefmt.Format(float64(written), sizefmt.IEC)
-      t := sizefmt.Format(float64(c), sizefmt.IEC)
-      fmt.Printf("%04d: %d packets - %s (%s)\n", i, count, w, t)
-      written, count = 0, 0
-    }
-  }()
-	for {
+			w := sizefmt.Format(float64(written), sizefmt.IEC)
+			t := sizefmt.Format(float64(c), sizefmt.IEC)
+			fmt.Printf("%04d: %d packets - %s (%s - %d)\n", i, count, w, t, n)
+			written, count = 0, 0
+		}
+	}()
+	for i := 0; *limit <= 0 || i <= *limit; i++ {
 		if n, err := io.CopyN(w, r, int64(*size)); err != nil && n == 0 {
 			if err == io.EOF {
 				break
 			}
 			return err
 		} else {
-      written += n
-      count++
-    }
+			written += n
+			count++
+		}
 		time.Sleep(*sleep)
 	}
 	return nil
