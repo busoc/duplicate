@@ -81,9 +81,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 
 func writeToPipe(r io.Reader, w io.Writer) func() error {
 	return func() error {
+		buffer := make([]byte, 1<<16)
 		w = Meta(w)
 		for {
-			switch _, err := io.Copy(w, r); err {
+			switch _, err := io.CopyBuffer(w, r, buffer); err {
 			case nil:
 			case io.EOF:
 				return nil
