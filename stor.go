@@ -23,7 +23,6 @@ func runStor(cmd *cli.Command, args []string) error {
 	}
 	defer r.Close()
 	c := struct {
-		Meta     bool
 		Prefix   string
 		Local    string `toml:"addr"`
 		Ifi      string `toml:"nic"`
@@ -48,16 +47,11 @@ func runStor(cmd *cli.Command, args []string) error {
 		roll.WithThreshold(c.Size, c.Count),
 	}
 
-	writer, err := roll.Roll(next, options...)
+	wc, err := roll.Roll(next, options...)
 	if err != nil {
 		return nil
 	}
-	defer writer.Close()
-
-	var wc io.Writer = writer
-	if c.Meta {
-		wc = Meta(wc)
-	}
+	defer wc.Close()
 
 	rc, err := Listen(c.Local, c.Ifi)
 	if err != nil {

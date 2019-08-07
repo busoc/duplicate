@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"time"
 
 	"github.com/midbel/cli"
+	"github.com/pkg/profile"
 )
 
 var commands = []*cli.Command{
@@ -37,6 +34,7 @@ func main() {
 			os.Exit(2)
 		}
 	}()
+	defer profile.Start(profile.MemProfile).Stop()
 	err := cli.Run(commands, cli.Usage("duplicate", "", commands), nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -60,50 +58,4 @@ func Listen(a, ifi string) (net.Conn, error) {
 		conn, err = net.ListenUDP("udp", addr)
 	}
 	return conn, err
-}
-
-var MetaLen = binary.Size(uint32(0)) + binary.Size(time.Second)
-
-type metaWriter struct {
-	inner io.Writer
-
-	sequence uint32
-	last     time.Time
-
-	buf  bytes.Buffer
-	size uint32
-}
-
-func Meta(w io.Writer) io.Writer {
-	return &metaWriter{
-		inner: w,
-		size:  uint32(MetaLen),
-	}
-}
-
-func (m *metaWriter) Write(bs []byte) (int, error) {
-	var elapsed time.Duration
-	if !m.last.IsZero() {
-		elapsed = time.Since(m.last)
-	}
-	size := uint32(len(bs)) + m.size
-
-	binary.Write(&m.buf, binary.BigEndian, size)
-	binary.Write(&m.buf, binary.BigEndian, m.sequence)
-	binary.Write(&m.buf, binary.BigEndian, elapsed)
-	m.buf.Write(bs)
-
-	count := m.buf.Len()
-
-	n, err := io.Copy(m.inner, &m.buf)
-	if err != nil {
-		return 0, err
-	}
-	if n != int64(count) {
-		return 0, fmt.Errorf("wrong number of bytes written (want: %d, got: %d)", count, n)
-	}
-	m.sequence++
-	m.last = time.Now()
-
-	return len(bs), err
 }

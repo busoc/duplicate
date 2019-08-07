@@ -18,33 +18,27 @@ const (
 
 func runSplit(cmd *cli.Command, args []string) error {
 	var (
-		sleep = cmd.Flag.Duration("i", DefaultSleep, "interval")
-		size  = cmd.Flag.Int("s", DefaultSize, "packet size")
-		limit = cmd.Flag.Int("n", 0, "packets count")
-		delay = cmd.Flag.Duration("d", 0, "timeout")
+		sleep   = cmd.Flag.Duration("i", DefaultSleep, "interval")
+		timeout = cmd.Flag.Duration("t", 0, "timeout")
+		size    = cmd.Flag.Int("s", DefaultSize, "packet size")
+		limit   = cmd.Flag.Int("n", 0, "packets count")
+		repeat  = cmd.Flag.Int("r", 0, "repeat")
 	)
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	w, err := net.Dial("udp", cmd.Flag.Arg(0))
+
+	w, err := dial(cmd.Flag.Arg(0), *timeout)
 	if err != nil {
-		return err
-	}
-	if *delay < 0 {
-		*delay = 0
-	}
-	var now time.Time
-	if *delay > 0 {
-		now = now.Add(*delay)
-	}
-	if err := w.SetDeadline(now); err != nil {
 		return err
 	}
 	defer w.Close()
 
-	rs := make([]io.Reader, 0, cmd.Flag.NArg())
-	for i := 1; i < cmd.Flag.NArg(); i++ {
-		r, err := os.Open(cmd.Flag.Arg(i))
+	files := cmd.Flag.Args()
+	files = listFiles(files[1:], *repeat)
+	rs := make([]io.Reader, 0, len(files))
+	for i := 1; i < len(files); i++ {
+		r, err := os.Open(files[i])
 		if err != nil {
 			return err
 		}
@@ -54,14 +48,31 @@ func runSplit(cmd *cli.Command, args []string) error {
 	if len(rs) == 0 {
 		return fmt.Errorf("no files given")
 	}
-
-	if *size <= 0 {
-		*size = DefaultSize
-	}
-	if *sleep == 0 {
-		*sleep = DefaultSleep
-	}
 	r := io.MultiReader(rs...)
+
+	return splitFiles(r, w, *size, *limit, *sleep)
+}
+
+func dial(addr string, timeout time.Duration) (net.Conn, error) {
+	w, err := net.Dial("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	var expired time.Time
+	if timeout > 0 {
+		expired = time.Now().Add(timeout)
+	}
+	return w, w.SetDeadline(expired)
+}
+
+func splitFiles(r io.Reader, w io.Writer, size, limit int, sleep time.Duration) error {
+	if size <= 0 {
+		size = DefaultSize
+	}
+	if sleep == 0 {
+		sleep = DefaultSleep
+	}
+
 	var written, count int64
 	go func() {
 		var i, c, n int64
@@ -76,8 +87,8 @@ func runSplit(cmd *cli.Command, args []string) error {
 			written, count = 0, 0
 		}
 	}()
-	for i := 0; *limit <= 0 || i <= *limit; i++ {
-		if n, err := io.CopyN(w, r, int64(*size)); err != nil && n == 0 {
+	for i := 0; limit <= 0 || i <= limit; i++ {
+		if n, err := io.CopyN(w, r, int64(size)); err != nil && n == 0 {
 			if err == io.EOF {
 				break
 			}
@@ -86,7 +97,19 @@ func runSplit(cmd *cli.Command, args []string) error {
 			written += n
 			count++
 		}
-		time.Sleep(*sleep)
+		time.Sleep(sleep)
 	}
 	return nil
+}
+
+func listFiles(files []string, repeat int) []string {
+	if repeat <= 0 {
+		return files
+	}
+	z := len(files)
+	fs := make([]string, z*repeat)
+	for i := 0; i < len(fs); i++ {
+		fs[i] = files[i%z]
+	}
+	return fs
 }
