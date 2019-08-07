@@ -1,9 +1,13 @@
 package main
 
 import (
+	"errors"
 	"io"
+	"sync"
 	"time"
 )
+
+var ErrClosed = errors.New("ring already closed")
 
 const DefaultQueueSize = 1 << 15
 
@@ -44,6 +48,8 @@ type ring struct {
 	when     time.Time
 	wait     time.Duration
 	interval time.Duration
+
+	once sync.Once
 }
 
 func Ring(size int, opts ...Option) io.ReadWriteCloser {
@@ -60,7 +66,12 @@ func Ring(size int, opts ...Option) io.ReadWriteCloser {
 }
 
 func (r *ring) Close() error {
-	return nil
+	err := ErrClosed
+	r.once.Do(func() {
+		close(r.queue)
+		err = nil
+	})
+	return err
 }
 
 func (r *ring) Write(xs []byte) (int, error) {
@@ -82,8 +93,12 @@ func (r *ring) Write(xs []byte) (int, error) {
 		}
 		r.when = time.Now()
 	}
-	r.queue <- pz
-	return size, nil
+	select {
+	case r.queue <- pz:
+		return size, nil
+	default:
+		return 0, ErrClosed
+	}
 }
 
 func (r *ring) Read(xs []byte) (int, error) {
