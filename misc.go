@@ -37,7 +37,7 @@ func runSplit(cmd *cli.Command, args []string) error {
 	files := cmd.Flag.Args()
 	files = listFiles(files[1:], *repeat)
 	rs := make([]io.Reader, 0, len(files))
-	for i := 1; i < len(files); i++ {
+	for i := 0; i < len(files); i++ {
 		r, err := os.Open(files[i])
 		if err != nil {
 			return err
@@ -103,7 +103,7 @@ func splitFiles(r io.Reader, w io.Writer, size, limit int, sleep time.Duration) 
 }
 
 func listFiles(files []string, repeat int) []string {
-	if repeat <= 0 {
+	if repeat <= 1 {
 		return files
 	}
 	z := len(files)
