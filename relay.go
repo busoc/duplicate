@@ -32,6 +32,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 		Delay    int
 		Interval int
 		Buffer   int
+		Forever  bool `toml:"force"`
 	}{}
 	if err := toml.NewDecoder(r).Decode(&c); err != nil {
 		return err
@@ -55,7 +56,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("no remote hosts given")
 	}
 	if wc := io.MultiWriter(wc...); c.Delay <= 0 {
-		_, err = io.Copy(wc, rc)
+		err = pipeData(rc, wc, c.Forever)()
 	} else {
 		if c.Buffer <= 0 {
 			c.Buffer = DefaultBufferSize
@@ -66,14 +67,14 @@ func runRelay(cmd *cli.Command, args []string) error {
 		)
 		defer rwg.Close()
 
-		grp.Go(pipeData(rc, rwg))
-		grp.Go(pipeData(rwg, wc))
+		grp.Go(pipeData(rc, rwg, c.Forever))
+		grp.Go(pipeData(rwg, wc, c.Forever))
 		err = grp.Wait()
 	}
 	return err
 }
 
-func pipeData(r io.Reader, w io.Writer) func() error {
+func pipeData(r io.Reader, w io.Writer, ignore bool) func() error {
 	return func() error {
 		buffer := make([]byte, 1<<16)
 		for {
@@ -82,7 +83,9 @@ func pipeData(r io.Reader, w io.Writer) func() error {
 			case io.EOF:
 				return nil
 			default:
-				return err
+				if !ignore {
+					return err
+				}
 			}
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/midbel/cli"
-	"github.com/pkg/profile"
 )
 
 var commands = []*cli.Command{
@@ -34,7 +33,6 @@ func main() {
 			os.Exit(2)
 		}
 	}()
-	defer profile.Start(profile.MemProfile).Stop()
 	err := cli.Run(commands, cli.Usage("duplicate", "", commands), nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
