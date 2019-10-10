@@ -33,11 +33,7 @@ func main() {
 			os.Exit(2)
 		}
 	}()
-	err := cli.Run(commands, cli.Usage("duplicate", "", commands), nil)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
+	cli.RunAndExit(commands, cli.Usage("duplicate", "", commands))
 }
 
 func Listen(a, ifi string) (net.Conn, error) {
