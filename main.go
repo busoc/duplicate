@@ -56,9 +56,10 @@ func main() {
 		grp errgroup.Group
 	)
 	for i, r := range c.Routes {
-		ws[i] = Ring(c.Buffer, withInterval(r.Delay, r.Interval))
+		rg := Ring(c.Buffer, withInterval(r.Delay, r.Interval))
+		ws[i] = rg
 
-		fn, err := Duplicate(r.Addr, ws[i])
+		fn, err := Duplicate(r.Addr, r.Delay, rg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -82,7 +83,7 @@ func main() {
 	}
 }
 
-func Duplicate(addr string, r io.ReadCloser) (func() error, error) {
+func Duplicate(addr string, wait int, r io.ReadCloser) (func() error, error) {
 	w, err := net.Dial(DefaultProtocol, addr)
 	if err != nil {
 		return nil, err
@@ -92,6 +93,10 @@ func Duplicate(addr string, r io.ReadCloser) (func() error, error) {
 			r.Close()
 			w.Close()
 		}()
+		if wait > 0 {
+			delay := time.Duration(wait)*time.Millisecond
+			time.Sleep(delay)
+		}
 		for {
 			_, err := io.Copy(w, r)
 			if errors.Is(err, io.EOF) {
@@ -201,9 +206,9 @@ func (r *ring) Write(xs []byte) (int, error) {
 	}
 	if r.wait > 0 {
 		if !r.when.IsZero() {
-			pz.elapsed = time.Since(r.when).Truncate(time.Millisecond)
+			pz.elapsed = time.Since(r.when)
 		}
-		r.when = time.Now()
+		r.when = time.Now().UTC()
 	}
 	select {
 	case r.queue <- pz:
@@ -226,12 +231,12 @@ func (r *ring) Read(xs []byte) (int, error) {
 	if n := copy(xs, r.buffer[pz.offset:]); n < pz.size {
 		copy(xs[n:], r.buffer)
 	}
-	if r.wait > 0 {
-		sleep := pz.elapsed
-		if r.interval > 0 {
-			sleep = r.interval
-		}
-		time.Sleep(sleep)
-	}
+	// if r.wait > 0 {
+	// 	sleep := pz.elapsed
+	// 	if r.interval > 0 {
+	// 		sleep = r.interval
+	// 	}
+	// 	time.Sleep(sleep)
+	// }
 	return pz.size, nil
 }
