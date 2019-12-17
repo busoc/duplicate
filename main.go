@@ -56,8 +56,22 @@ func main() {
 		grp errgroup.Group
 	)
 	for i, r := range c.Routes {
-		rg := Ring(c.Buffer, withInterval(r.Delay, r.Interval))
-		ws[i] = rg
+		var (
+			wg io.WriteCloser
+			rg io.ReadCloser
+		)
+		if r.Delay > 0 {
+			g, err := Ring(c.Buffer, withInterval(r.Delay, r.Interval))
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			rg, wg = g, g
+		} else {
+			rg, wg = io.Pipe()
+			defer wg.Close()
+		}
+		ws[i] = wg
 
 		fn, err := Duplicate(r.Addr, r.Delay, rg)
 		if err != nil {
@@ -169,7 +183,10 @@ type ring struct {
 	once sync.Once
 }
 
-func Ring(size int, opts ...option) io.ReadWriteCloser {
+func Ring(size int, opts ...option) (io.ReadWriteCloser, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("ring: invalid size")
+	}
 	r := ring{
 		buffer: make([]byte, size),
 	}
@@ -179,7 +196,7 @@ func Ring(size int, opts ...option) io.ReadWriteCloser {
 	if r.queue == nil {
 		r.queue = make(chan poze, DefaultQueueSize)
 	}
-	return &r
+	return &r, nil
 }
 
 func (r *ring) Close() error {
