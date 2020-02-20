@@ -28,9 +28,9 @@ func main() {
 	c := struct {
 		Remote string
 		Ifi    string `toml:"nic"`
-		Buffer int
 		Routes []struct {
 			Addr     string `toml:"address"`
+			Buffer   int
 			Delay    int
 			Interval int
 		} `toml:"route"`
@@ -38,10 +38,6 @@ func main() {
 	if err := toml.DecodeFile(flag.Arg(0), &c); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-	}
-
-	if c.Buffer <= 0 {
-		c.Buffer = DefaultBufferSize
 	}
 
 	r, err := Listen(c.Remote, c.Ifi)
@@ -61,7 +57,10 @@ func main() {
 			rg io.ReadCloser
 		)
 		if r.Delay > 0 {
-			g, err := Ring(c.Buffer, withInterval(r.Delay, r.Interval))
+			if r.Buffer <= 0 {
+				r.Buffer = DefaultBufferSize
+			}
+			g, err := Ring(r.Buffer, withInterval(r.Delay, r.Interval))
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
@@ -108,7 +107,7 @@ func Duplicate(addr string, wait int, r io.ReadCloser) (func() error, error) {
 			w.Close()
 		}()
 		if wait > 0 {
-			delay := time.Duration(wait)*time.Millisecond
+			delay := time.Duration(wait) * time.Millisecond
 			time.Sleep(delay)
 		}
 		for {
