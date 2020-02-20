@@ -31,11 +31,10 @@ func main() {
 		Remote string
 		Ifi    string `toml:"nic"`
 		Routes []struct {
-			Proto    string `toml:"protocol"`
-			Addr     string `toml:"address"`
-			Buffer   int
-			Delay    int
-			Interval int
+			Proto  string `toml:"protocol"`
+			Addr   string `toml:"address"`
+			Buffer int
+			Delay  int
 		} `toml:"route"`
 	}{}
 	if err := toml.DecodeFile(flag.Arg(0), &c); err != nil {
@@ -53,7 +52,7 @@ func main() {
 			rg io.ReadCloser
 		)
 		if r.Delay > 0 {
-			rg, wg = Ring(r.Buffer, withInterval(r.Delay, r.Interval))
+			rg, wg = Ring(r.Buffer, withDelay(r.Delay))
 		} else {
 			rg, wg = io.Pipe()
 			defer wg.Close()
@@ -148,17 +147,15 @@ type poze struct {
 
 type option func(*ring)
 
-func withInterval(wait, interval int) option {
+func withDelay(wait int) option {
 	var (
 		w = time.Duration(wait) * time.Millisecond
-		i = time.Duration(interval) * time.Millisecond
 	)
 	return func(r *ring) {
 		if w <= 0 {
 			return
 		}
 		r.wait = w
-		r.interval = i
 	}
 }
 
@@ -175,10 +172,9 @@ type ring struct {
 	buffer []byte
 	queue  chan poze
 
-	offset   int
-	when     time.Time
-	wait     time.Duration
-	interval time.Duration
+	offset int
+	when   time.Time
+	wait   time.Duration
 
 	once sync.Once
 }
@@ -248,12 +244,5 @@ func (r *ring) Read(xs []byte) (int, error) {
 	if n := copy(xs, r.buffer[pz.offset:]); n < pz.size {
 		copy(xs[n:], r.buffer)
 	}
-	// if r.wait > 0 {
-	// 	sleep := pz.elapsed
-	// 	if r.interval > 0 {
-	// 		sleep = r.interval
-	// 	}
-	// 	time.Sleep(sleep)
-	// }
 	return pz.size, nil
 }
