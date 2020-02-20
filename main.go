@@ -43,13 +43,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	r, err := Listen(c.Remote, c.Ifi)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	defer r.Close()
-
 	var (
 		ws  = make([]io.Writer, len(c.Routes))
 		grp errgroup.Group
@@ -60,15 +53,7 @@ func main() {
 			rg io.ReadCloser
 		)
 		if r.Delay > 0 {
-			if r.Buffer <= 0 {
-				r.Buffer = DefaultBufferSize
-			}
-			g, err := Ring(r.Buffer, withInterval(r.Delay, r.Interval))
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(2)
-			}
-			rg, wg = g, g
+			rg, wg = Ring(r.Buffer, withInterval(r.Delay, r.Interval))
 		} else {
 			rg, wg = io.Pipe()
 			defer wg.Close()
@@ -82,6 +67,13 @@ func main() {
 		}
 		grp.Go(fn)
 	}
+
+	r, err := Listen(c.Remote, c.Ifi)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	defer r.Close()
 
 	grp.Go(func() error {
 		w := io.MultiWriter(ws...)
@@ -191,20 +183,20 @@ type ring struct {
 	once sync.Once
 }
 
-func Ring(size int, opts ...option) (io.ReadWriteCloser, error) {
+func Ring(size int, opts ...option) (io.ReadCloser, io.WriteCloser) {
 	if size <= 0 {
-		return nil, fmt.Errorf("ring: invalid size")
+		size = DefaultBufferSize
 	}
-	r := ring{
+	rg := ring{
 		buffer: make([]byte, size),
 	}
 	for _, o := range opts {
-		o(&r)
+		o(&rg)
 	}
-	if r.queue == nil {
-		r.queue = make(chan poze, DefaultQueueSize)
+	if rg.queue == nil {
+		rg.queue = make(chan poze, DefaultQueueSize)
 	}
-	return &r, nil
+	return &rg, &rg
 }
 
 func (r *ring) Close() error {
