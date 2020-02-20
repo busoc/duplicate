@@ -1,8 +1,12 @@
 # duplicate
 
-duplicate is a small utility tool that listen for an incoming udp stream and
-duplicates this stream to multiple remote destination. Optionally, duplicate
-can wait for a configured delay before starting duplicating the received packets.
+duplicate is a small utility tool that listen for an incoming packets stream and
+duplicates this stream to multiple remote destinations. Optionally, duplicate
+can wait for a configured delay before starting transmitting the incoming packets.
+
+duplicate can be configured to listen for incoming packets either in TCP or in UDP.
+Moreover, it can forward the packets stream in TCP or UDP too. This last option
+is specific to each route configured to duplicate.
 
 usage:
 
@@ -40,8 +44,9 @@ $ duplicate config.toml
 
 ```toml
 # listen for UDP packets coming from remote address
-remote = "127.0.0.1:11111"
-nic    = "eth0"
+protocol = "udp" # default value for protocol option
+remote   = "127.0.0.1:11111"
+nic      = "eth0"
 
 [[route]]
 # delay of 5s with buffer size of ~8KB
