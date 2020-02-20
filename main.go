@@ -67,15 +67,37 @@ func main() {
 		grp.Go(fn)
 	}
 
-	r, err := Listen(c.Remote, c.Ifi)
+	var (
+		fn  func() error
+		err error
+	)
+	switch w := io.MultiWriter(ws...); strings.ToLower(c.Proto) {
+	case "", "udp":
+		fn, err = listenUDP(c.Remote, c.Ifi, w)
+	case "tcp":
+		fn, err = listenTCP(c.Remote, w)
+	default:
+		err = fmt.Errorf("unsupported protocol %s", c.Proto)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	defer r.Close()
+	grp.Go(fn)
 
-	grp.Go(func() error {
-		w := io.MultiWriter(ws...)
+	if err := grp.Wait(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(3)
+	}
+}
+
+func listenUDP(addr, nic string, w io.Writer) (func() error, error) {
+	r, err := Listen(addr, nic)
+	if err != nil {
+		return nil, err
+	}
+	return func() error {
+		defer r.Close()
 		for {
 			_, err := io.Copy(w, r)
 			if errors.Is(err, io.EOF) {
@@ -83,11 +105,29 @@ func main() {
 			}
 		}
 		return nil
-	})
-	if err := grp.Wait(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(3)
+	}, nil
+}
+
+func listenTCP(addr string, w io.Writer) (func() error, error) {
+	s, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
 	}
+	return func() error {
+		defer s.Close()
+		for {
+			r, err := s.Accept()
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(w, r)
+			r.Close()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 func Duplicate(proto, addr string, wait int, r io.ReadCloser) (func() error, error) {
