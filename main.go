@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,9 +27,11 @@ const DefaultProtocol = "udp"
 func main() {
 	flag.Parse()
 	c := struct {
+		Proto  string `toml:"protocol"`
 		Remote string
 		Ifi    string `toml:"nic"`
 		Routes []struct {
+			Proto    string `toml:"protocol"`
 			Addr     string `toml:"address"`
 			Buffer   int
 			Delay    int
@@ -72,7 +75,7 @@ func main() {
 		}
 		ws[i] = wg
 
-		fn, err := Duplicate(r.Addr, r.Delay, rg)
+		fn, err := Duplicate(r.Proto, r.Addr, r.Delay, rg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -96,8 +99,11 @@ func main() {
 	}
 }
 
-func Duplicate(addr string, wait int, r io.ReadCloser) (func() error, error) {
-	w, err := net.Dial(DefaultProtocol, addr)
+func Duplicate(proto, addr string, wait int, r io.ReadCloser) (func() error, error) {
+	if proto == "" {
+		proto = DefaultProtocol
+	}
+	w, err := net.Dial(strings.ToLower(proto), addr)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +118,9 @@ func Duplicate(addr string, wait int, r io.ReadCloser) (func() error, error) {
 		}
 		for {
 			_, err := io.Copy(w, r)
+			if _, ok := w.(*net.TCPConn); ok && err != nil {
+				return err
+			}
 			if errors.Is(err, io.EOF) {
 				break
 			}
