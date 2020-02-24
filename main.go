@@ -24,7 +24,22 @@ const (
 
 const DefaultProtocol = "udp"
 
+const help = `
+duplicate forwards an incoming stream of UDP or TCP packets to a set of remote hosts
+via UDP or TCP, optionally, adding a delay in the transmission of the stream.
+
+options:
+
+  -h  show this help message and exit
+
+usage: duplicate [-h] <config.toml>
+`
+
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, strings.TrimSpace(help))
+		os.Exit(2)
+	}
 	flag.Parse()
 	c := struct {
 		Proto   string `toml:"protocol"`
