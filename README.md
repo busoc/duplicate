@@ -27,6 +27,14 @@ $ duplicate config.toml
   if the option is not set or let empty.
 * keep-listen: tells duplicate to stay listening after the TCP connection with the remote
   client is closed or encounters any errors
+* certificate: TLS certificate
+
+### table [certificate]
+
+* cert-file: path to certificate pem encoded
+* cert-key: path to key pem encode
+* cert-auth: list of certificates to be used when verifying clients certificate
+* policy:
 
 ### table [[route]]
 
@@ -42,6 +50,14 @@ $ duplicate config.toml
 * buffer:  size of the buffer to use when duplicate has to wait before forwarding
   the incoming stream. If the option is not set or set to 0, duplicate uses a
   default value of 8MB. When no delay is specified, this option has no effect.
+* certificate: TLS certificate
+
+### table [route.certificate]
+
+* cert-file: path to certificate pem encoded
+* cert-key: path to key pem encode
+* cert-auth: list of certificates to be used when verifying server certificate
+* insecure:
 
 ### example
 
@@ -50,6 +66,12 @@ $ duplicate config.toml
 protocol = "udp" # default value for protocol option
 address  = "127.0.0.1:11111"
 nic      = "eth0"
+
+[certificate]
+cert-file = "tmp/dup-srv.pem"
+key-file  = "tmp/dup-srv.key"
+policy    = ""
+cert-auth = []
 
 [[route]]
 # delay of 5s with buffer size of ~8KB
@@ -67,4 +89,10 @@ delay   = 1000
 # no delay
 address  = "localhost:44444"
 protocol = "tcp" # duplicate is case insensitive
+
+  [route.certificate]
+  cert-file = "tmp/dup-client.pem"
+  key-file  = "tmp/dup-client.key"
+  cert-auth = []
+  insecure  = false
 ```

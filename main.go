@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"strings"
@@ -30,32 +33,158 @@ via UDP or TCP, optionally, adding a delay in the transmission of the stream.
 
 options:
 
-  -h  show this help message and exit
+  -d DELAY   wait for DELAY before sending packets (in milliseconds)
+  -b BUFFER  use a buffer of BUFFER bytes
+  -i IFI     use network interface IFI when subscribing to multicast group
+  -l PROTO   use PROTO to listen for incoming packets
+  -r PROTO   use PROTO to send packets to remote host(s)
+  -k         stay listening after current TCP connection is completed
+  -h         show this help message and exit
 
-usage: duplicate [-h] <config.toml>
+usage:
+$ duplicate [-h] <config.toml>
+$ duplicate [-d] [-b] [-i] [-l] [-r] [-k] [-k] <[proto://]host:port> <[proto://]host:port...>
 `
+
+type Route struct {
+	Proto  string `toml:"protocol"`
+	Addr   string `toml:"address"`
+	Buffer int
+	Delay  int
+	Cert   Certificate `toml:"certificate"`
+}
+
+type Certificate struct {
+	Pem      string `toml:"cert-file"`
+	Key      string `toml:"key-file"`
+	Policy   string
+	Insecure bool
+	CertAuth []string
+}
+
+func (c Certificate) Listen(inner net.Listener) (net.Listener, error) {
+	if c.Pem == "" && c.Key == "" {
+		return inner, nil
+	}
+
+	pool, err := c.buildCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.LoadX509KeyPair(c.Pem, c.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientCAs:    pool,
+	}
+
+	switch strings.ToLower(c.Policy) {
+	case "request":
+		cfg.ClientAuth = tls.RequestClientCert
+	case "require", "any":
+		cfg.ClientAuth = tls.RequireAnyClientCert
+	case "verify":
+		cfg.ClientAuth = tls.VerifyClientCertIfGiven
+	case "none":
+		cfg.ClientAuth = tls.NoClientCert
+	case "", "require+verify":
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	default:
+		return nil, fmt.Errorf("%s: unknown policy", c.Policy)
+	}
+
+	return tls.NewListener(inner, &cfg), nil
+}
+
+func (c Certificate) Client(inner net.Conn) (net.Conn, error) {
+	if c.Pem == "" && c.Key == "" {
+		return inner, nil
+	}
+
+	pool, err := c.buildCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.LoadX509KeyPair(c.Pem, c.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		InsecureSkipVerify: c.Insecure,
+		RootCAs:            pool,
+	}
+	return tls.Client(inner, &cfg), nil
+}
+
+func (c Certificate) buildCertPool() (*x509.CertPool, error) {
+	if len(c.CertAuth) == 0 {
+		return x509.SystemCertPool()
+	}
+	pool := x509.NewCertPool()
+	for _, f := range c.CertAuth {
+		pem, err := ioutil.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := x509.ParseCertificate(pem)
+		if err != nil {
+			return nil, err
+		}
+		pool.AddCert(cert)
+	}
+	return pool, nil
+}
 
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, strings.TrimSpace(help))
 		os.Exit(2)
 	}
+	var (
+		delay  = flag.Int("d", 0, "delay in milliseconds")
+		buffer = flag.Int("b", 0, "buffer size")
+		keep   = flag.Bool("k", false, "stay listening")
+		nic    = flag.String("i", "", "network interface")
+		psrc   = flag.String("l", DefaultProtocol, "protocol")
+		pdst   = flag.String("r", DefaultProtocol, "protocol")
+	)
 	flag.Parse()
+
 	c := struct {
-		Proto   string `toml:"protocol"`
-		Addr    string `toml:"address"`
-		Ifi     string `toml:"nic"`
-		Forever bool   `toml:"keep-listen"`
-		Routes  []struct {
-			Proto  string `toml:"protocol"`
-			Addr   string `toml:"address"`
-			Buffer int
-			Delay  int
-		} `toml:"route"`
+		Proto   string      `toml:"protocol"`
+		Addr    string      `toml:"address"`
+		Ifi     string      `toml:"nic"`
+		Forever bool        `toml:"keep-listen"`
+		Cert    Certificate `toml:"certificate"`
+		Routes  []Route     `toml:"route"`
 	}{}
-	if err := toml.DecodeFile(flag.Arg(0), &c); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+
+	if flag.NArg() == 1 {
+		if err := toml.DecodeFile(flag.Arg(0), &c); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	} else {
+		c.Addr = flag.Arg(0)
+		c.Forever = *keep
+		c.Ifi = *nic
+		c.Proto = *psrc
+		for i := 1; i < flag.NArg(); i++ {
+			r := Route{
+				Addr:   flag.Arg(i),
+				Buffer: *buffer,
+				Delay:  *delay,
+				Proto:  *pdst,
+			}
+			c.Routes = append(c.Routes, r)
+		}
 	}
 
 	var (
@@ -75,7 +204,7 @@ func main() {
 		}
 		ws[i] = wg
 
-		fn, err := Duplicate(r.Proto, r.Addr, r.Delay, rg)
+		fn, err := Duplicate(r, rg)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -89,9 +218,9 @@ func main() {
 	)
 	switch w := io.MultiWriter(ws...); strings.ToLower(c.Proto) {
 	case "", "udp":
-		fn, err = listenUDP(c.Addr, c.Ifi, w)
+		fn, err = listenUDP(w, c.Addr, c.Ifi)
 	case "tcp":
-		fn, err = listenTCP(c.Addr, w, c.Forever)
+		fn, err = listenTCP(w, c.Addr, c.Forever, c.Cert)
 	default:
 		err = fmt.Errorf("unsupported protocol %s", c.Proto)
 	}
@@ -107,7 +236,7 @@ func main() {
 	}
 }
 
-func listenUDP(addr, nic string, w io.Writer) (func() error, error) {
+func listenUDP(w io.Writer, addr, nic string) (func() error, error) {
 	r, err := Listen(addr, nic)
 	if err != nil {
 		return nil, err
@@ -124,8 +253,12 @@ func listenUDP(addr, nic string, w io.Writer) (func() error, error) {
 	}, nil
 }
 
-func listenTCP(addr string, w io.Writer, forever bool) (func() error, error) {
+func listenTCP(w io.Writer, addr string, forever bool, cert Certificate) (func() error, error) {
 	s, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	s, err = cert.Listen(s)
 	if err != nil {
 		return nil, err
 	}
@@ -149,25 +282,31 @@ func listenTCP(addr string, w io.Writer, forever bool) (func() error, error) {
 	}, nil
 }
 
-func Duplicate(proto, addr string, wait int, r io.ReadCloser) (func() error, error) {
-	if proto == "" {
-		proto = DefaultProtocol
+func Duplicate(r Route, rc io.ReadCloser) (func() error, error) {
+	if r.Proto == "" {
+		r.Proto = DefaultProtocol
 	}
-	w, err := net.Dial(strings.ToLower(proto), addr)
+	w, err := net.Dial(strings.ToLower(r.Proto), r.Addr)
 	if err != nil {
 		return nil, err
 	}
+	if strings.ToLower(r.Proto) == "tcp" {
+		w, err = r.Cert.Client(w)
+		if err != nil {
+			return nil, err
+		}
+	}
 	fn := func() error {
 		defer func() {
-			r.Close()
+			rc.Close()
 			w.Close()
 		}()
-		if wait > 0 {
-			delay := time.Duration(wait) * time.Millisecond
+		if r.Delay > 0 {
+			delay := time.Duration(r.Delay) * time.Millisecond
 			time.Sleep(delay)
 		}
 		for {
-			_, err := io.Copy(w, r)
+			_, err := io.Copy(w, rc)
 			if _, ok := w.(*net.TCPConn); ok && err != nil {
 				return err
 			}
