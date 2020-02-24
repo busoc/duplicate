@@ -18,12 +18,15 @@ $ duplicate config.toml
 
 ### table [default]
 
-* remote: tell duplicate to listen for UDP packets coming from remote address.
-* nic:    when duplicate subscribe to a multicast group for its incoming packets
+* address: tells duplicate to listen for UDP packets coming from remote address or
+  to listen from incoming packets on the specified address.
+* nic: when duplicate subscribes to a multicast group for its incoming packets
   and that multiple interface are avaible on the server, the nic (network interface
   controller) tells duplicate the interface with the specified identifier.
   This option is not mandatory. Duplicate will chose the default network interface
   if the option is not set or let empty.
+* keep-listen: tells duplicate to stay listening after the TCP connection with the remote
+  client is closed or encounters any errors
 
 ### table [[route]]
 
@@ -45,7 +48,7 @@ $ duplicate config.toml
 ```toml
 # listen for UDP packets coming from remote address
 protocol = "udp" # default value for protocol option
-remote   = "127.0.0.1:11111"
+address  = "127.0.0.1:11111"
 nic      = "eth0"
 
 [[route]]

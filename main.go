@@ -27,10 +27,11 @@ const DefaultProtocol = "udp"
 func main() {
 	flag.Parse()
 	c := struct {
-		Proto  string `toml:"protocol"`
-		Remote string
-		Ifi    string `toml:"nic"`
-		Routes []struct {
+		Proto   string `toml:"protocol"`
+		Addr    string `toml:"address"`
+		Ifi     string `toml:"nic"`
+		Forever bool   `toml:"keep-listen"`
+		Routes  []struct {
 			Proto  string `toml:"protocol"`
 			Addr   string `toml:"address"`
 			Buffer int
@@ -73,9 +74,9 @@ func main() {
 	)
 	switch w := io.MultiWriter(ws...); strings.ToLower(c.Proto) {
 	case "", "udp":
-		fn, err = listenUDP(c.Remote, c.Ifi, w)
+		fn, err = listenUDP(c.Addr, c.Ifi, w)
 	case "tcp":
-		fn, err = listenTCP(c.Remote, w)
+		fn, err = listenTCP(c.Addr, w, c.Forever)
 	default:
 		err = fmt.Errorf("unsupported protocol %s", c.Proto)
 	}
@@ -108,7 +109,7 @@ func listenUDP(addr, nic string, w io.Writer) (func() error, error) {
 	}, nil
 }
 
-func listenTCP(addr string, w io.Writer) (func() error, error) {
+func listenTCP(addr string, w io.Writer, forever bool) (func() error, error) {
 	s, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -120,8 +121,14 @@ func listenTCP(addr string, w io.Writer) (func() error, error) {
 			if err != nil {
 				return err
 			}
+			if c, ok := r.(*net.TCPConn); ok {
+				c.SetKeepAlive(true)
+			}
 			io.Copy(w, r)
 			r.Close()
+			if !forever {
+				break
+			}
 		}
 		return nil
 	}, nil
