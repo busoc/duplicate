@@ -120,11 +120,8 @@ func listenTCP(addr string, w io.Writer) (func() error, error) {
 			if err != nil {
 				return err
 			}
-			_, err = io.Copy(w, r)
+			io.Copy(w, r)
 			r.Close()
-			if err != nil {
-				return err
-			}
 		}
 		return nil
 	}, nil
