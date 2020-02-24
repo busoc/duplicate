@@ -12,6 +12,7 @@ usage:
 
 ```bash
 $ duplicate config.toml
+$ duplicate [-d] [-b] [-i] [-l] [-r] [-k] [-k] <[proto://]host:port> <[proto://]host:port...>
 ```
 
 ## configuration
