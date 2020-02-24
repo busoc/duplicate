@@ -133,11 +133,9 @@ func (c Certificate) buildCertPool() (*x509.CertPool, error) {
 		if err != nil {
 			return nil, err
 		}
-		cert, err := x509.ParseCertificate(pem)
-		if err != nil {
-			return nil, err
+		if ok := pool.AppendCertsFromPEM(pem); !ok {
+			return nil, fmt.Errorf("fail to append certificate %s", f)
 		}
-		pool.AddCert(cert)
 	}
 	return pool, nil
 }
