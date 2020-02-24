@@ -34,6 +34,7 @@ via UDP or TCP, optionally, adding a delay in the transmission of the stream.
 options:
 
   -d DELAY   wait for DELAY before sending packets (in milliseconds)
+  -t TIME    minimum interval to wait before sending a packet
   -b BUFFER  use a buffer of BUFFER bytes
   -i IFI     use network interface IFI when subscribing to multicast group
   -l PROTO   use PROTO to listen for incoming packets
@@ -47,11 +48,12 @@ $ duplicate [-d] [-b] [-i] [-l] [-r] [-k] [-k] <[proto://]host:port> <[proto://]
 `
 
 type Route struct {
-	Proto  string `toml:"protocol"`
-	Addr   string `toml:"address"`
-	Buffer int
-	Delay  int
-	Cert   Certificate `toml:"certificate"`
+	Proto    string `toml:"protocol"`
+	Addr     string `toml:"address"`
+	Buffer   int
+	Delay    int
+	Interval int
+	Cert     Certificate `toml:"certificate"`
 }
 
 type Certificate struct {
@@ -146,12 +148,13 @@ func main() {
 		os.Exit(2)
 	}
 	var (
-		delay  = flag.Int("d", 0, "delay in milliseconds")
-		buffer = flag.Int("b", 0, "buffer size")
-		keep   = flag.Bool("k", false, "stay listening")
-		nic    = flag.String("i", "", "network interface")
-		psrc   = flag.String("l", DefaultProtocol, "protocol")
-		pdst   = flag.String("r", DefaultProtocol, "protocol")
+		delay    = flag.Int("d", 0, "delay in milliseconds")
+		buffer   = flag.Int("b", 0, "buffer size")
+		interval = flag.Int("t", 0, "minimum interval")
+		keep     = flag.Bool("k", false, "stay listening")
+		nic      = flag.String("i", "", "network interface")
+		psrc     = flag.String("l", DefaultProtocol, "protocol")
+		pdst     = flag.String("r", DefaultProtocol, "protocol")
 	)
 	flag.Parse()
 
@@ -179,10 +182,11 @@ func main() {
 		for i := 1; i < flag.NArg(); i++ {
 			proto, addr := splitAddr(flag.Arg(i), *pdst)
 			r := Route{
-				Addr:   addr,
-				Buffer: *buffer,
-				Delay:  *delay,
-				Proto:  proto,
+				Addr:     addr,
+				Buffer:   *buffer,
+				Delay:    *delay,
+				Interval: *interval,
+				Proto:    proto,
 			}
 			c.Routes = append(c.Routes, r)
 		}
@@ -198,7 +202,7 @@ func main() {
 			rg io.ReadCloser
 		)
 		if r.Delay > 0 {
-			rg, wg = Ring(r.Buffer, withDelay(r.Delay))
+			rg, wg = Ring(r.Buffer, withDelay(r.Delay), withInterval(r.Interval))
 		} else {
 			rg, wg = io.Pipe()
 			defer wg.Close()
@@ -255,8 +259,10 @@ func listenUDP(w io.Writer, addr, nic string) (func() error, error) {
 	}
 	return func() error {
 		defer r.Close()
+
+		buf := make([]byte, 1<<16)
 		for {
-			_, err := io.Copy(w, r)
+			_, err := io.CopyBuffer(w, r, buf)
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -313,10 +319,6 @@ func Duplicate(r Route, rc io.ReadCloser) (func() error, error) {
 			rc.Close()
 			w.Close()
 		}()
-		if r.Delay > 0 {
-			delay := time.Duration(r.Delay) * time.Millisecond
-			time.Sleep(delay)
-		}
 		for {
 			_, err := io.Copy(w, rc)
 			if _, ok := w.(*net.TCPConn); ok && err != nil {
@@ -358,14 +360,22 @@ type poze struct {
 type option func(*ring)
 
 func withDelay(wait int) option {
-	var (
-		w = time.Duration(wait) * time.Millisecond
-	)
+	w := time.Duration(wait) * time.Millisecond
 	return func(r *ring) {
 		if w <= 0 {
 			return
 		}
 		r.wait = w
+	}
+}
+
+func withInterval(interval int) option {
+	w := time.Duration(interval) * time.Millisecond
+	return func(r *ring) {
+		if w <= 0 {
+			return
+		}
+		r.interval = w
 	}
 }
 
@@ -382,9 +392,10 @@ type ring struct {
 	buffer []byte
 	queue  chan poze
 
-	offset int
-	when   time.Time
-	wait   time.Duration
+	offset   int
+	when     time.Time
+	wait     time.Duration
+	interval time.Duration
 
 	once sync.Once
 }
@@ -428,10 +439,11 @@ func (r *ring) Write(xs []byte) (int, error) {
 		elapsed: r.wait,
 	}
 	if r.wait > 0 {
+		now := time.Now().UTC()
 		if !r.when.IsZero() {
-			pz.elapsed = time.Since(r.when)
+			pz.elapsed = now.Sub(r.when)
 		}
-		r.when = time.Now().UTC()
+		r.when = now
 	}
 	select {
 	case r.queue <- pz:
@@ -451,8 +463,16 @@ func (r *ring) Read(xs []byte) (int, error) {
 		return 0, io.ErrShortBuffer
 	}
 
-	if n := copy(xs, r.buffer[pz.offset:]); n < pz.size {
-		copy(xs[n:], r.buffer)
+	if len(xs) > len(r.buffer) {
+		copy(xs, r.buffer)
+	} else {
+		if n := copy(xs, r.buffer[pz.offset:]); n < pz.size {
+			copy(xs[n:], r.buffer)
+		}
 	}
+	if r.interval > 0 && pz.elapsed < r.interval {
+		pz.elapsed = r.interval
+	}
+	time.Sleep(pz.elapsed)
 	return pz.size, nil
 }
