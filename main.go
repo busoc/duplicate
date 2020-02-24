@@ -106,8 +106,9 @@ func Duplicate(addr string, wait int, r io.ReadCloser) (func() error, error) {
 			r.Close()
 			w.Close()
 		}()
+		buf := make([]byte, 1<<16)
 		for {
-			_, err := io.Copy(w, r)
+			_, err := io.CopyBuffer(w, r, buf)
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -217,10 +218,11 @@ func (r *ring) Write(xs []byte) (int, error) {
 		elapsed: r.wait,
 	}
 	if r.wait > 0 {
+		now := time.Now().UTC()
 		if !r.when.IsZero() {
-			pz.elapsed = time.Since(r.when)
+			pz.elapsed = now.Sub(r.when)
 		}
-		r.when = time.Now().UTC()
+		r.when = now
 	}
 	select {
 	case r.queue <- pz:
@@ -241,9 +243,17 @@ func (r *ring) Read(xs []byte) (int, error) {
 		return 0, io.ErrShortBuffer
 	}
 
-	if n := copy(xs, r.buffer[pz.offset:]); n < pz.size {
-		remain := pz.size - n
-		n += copy(xs[n:n+remain], r.buffer)
+	if len(r.buffer) < len(xs) {
+		copy(xs, r.buffer)
+	} else {
+		n := copy(xs, r.buffer[pz.offset:])
+		if n < pz.size {
+			copy(xs[n:], r.buffer[:pz.size-n])
+		}
+	}
+
+	if r.interval > 0 && pz.elapsed > r.interval {
+		pz.elapsed = r.interval
 	}
 	time.Sleep(pz.elapsed)
 	return pz.size, nil
