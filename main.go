@@ -172,16 +172,19 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		c.Addr = flag.Arg(0)
+		proto, addr := splitAddr(flag.Arg(0), *psrc)
+
+		c.Addr = addr
 		c.Forever = *keep
 		c.Ifi = *nic
-		c.Proto = *psrc
+		c.Proto = proto
 		for i := 1; i < flag.NArg(); i++ {
+			proto, addr := splitAddr(flag.Arg(i), *pdst)
 			r := Route{
-				Addr:   flag.Arg(i),
+				Addr:   addr,
 				Buffer: *buffer,
 				Delay:  *delay,
-				Proto:  *pdst,
+				Proto:  proto,
 			}
 			c.Routes = append(c.Routes, r)
 		}
@@ -234,6 +237,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(3)
 	}
+}
+
+func splitAddr(addr, proto string) (string, string) {
+	ix := strings.Index(addr, "://")
+	if ix > 0 {
+		proto = addr[:ix]
+	}
+	if proto == "" {
+		proto = DefaultProtocol
+	}
+	return proto, strings.TrimLeft(addr, "://")
 }
 
 func listenUDP(w io.Writer, addr, nic string) (func() error, error) {
