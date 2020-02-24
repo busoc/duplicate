@@ -106,10 +106,6 @@ func Duplicate(addr string, wait int, r io.ReadCloser) (func() error, error) {
 			r.Close()
 			w.Close()
 		}()
-		if wait > 0 {
-			delay := time.Duration(wait) * time.Millisecond
-			time.Sleep(delay)
-		}
 		for {
 			_, err := io.Copy(w, r)
 			if errors.Is(err, io.EOF) {
@@ -239,20 +235,16 @@ func (r *ring) Read(xs []byte) (int, error) {
 	if !ok {
 		return 0, io.EOF
 	}
+
 	size := len(xs)
 	if size < pz.size {
 		return 0, io.ErrShortBuffer
 	}
 
 	if n := copy(xs, r.buffer[pz.offset:]); n < pz.size {
-		copy(xs[n:], r.buffer)
+		remain := pz.size - n
+		n += copy(xs[n:n+remain], r.buffer)
 	}
-	// if r.wait > 0 {
-	// 	sleep := pz.elapsed
-	// 	if r.interval > 0 {
-	// 		sleep = r.interval
-	// 	}
-	// 	time.Sleep(sleep)
-	// }
+	time.Sleep(pz.elapsed)
 	return pz.size, nil
 }
