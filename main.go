@@ -57,19 +57,11 @@ func main() {
 			rg io.ReadCloser
 		)
 		if r.Delay > 0 {
-			if r.Buffer <= 0 {
-				r.Buffer = DefaultBufferSize
-			}
-			g, err := Ring(r.Buffer, withInterval(r.Delay, r.Interval))
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(2)
-			}
-			rg, wg = g, g
+			rg, wg = Ring(r.Buffer, withDelay(r.Delay))
 		} else {
 			rg, wg = io.Pipe()
-			defer wg.Close()
 		}
+		defer wg.Close()
 		ws[i] = wg
 
 		fn, err := Duplicate(r.Addr, r.Delay, rg)
@@ -139,22 +131,16 @@ func Listen(a, ifi string) (net.Conn, error) {
 type poze struct {
 	size    int
 	offset  int
-	elapsed time.Duration
 }
 
 type option func(*ring)
 
-func withInterval(wait, interval int) option {
-	var (
-		w = time.Duration(wait) * time.Millisecond
-		i = time.Duration(interval) * time.Millisecond
-	)
+func withDelay(wait int) option {
 	return func(r *ring) {
-		if w <= 0 {
+		if wait <= 0 {
 			return
 		}
-		r.wait = w
-		r.interval = i
+		r.wait = time.Duration(wait) * time.Millisecond
 	}
 }
 
@@ -163,48 +149,51 @@ func withQueue(z int) option {
 		if z < 0 {
 			return
 		}
+		close(r.queue)
 		r.queue = make(chan poze, z)
 	}
 }
 
 type ring struct {
 	buffer []byte
-	queue  chan poze
 
 	offset   int
 	when     time.Time
 	wait     time.Duration
-	interval time.Duration
 
 	once sync.Once
+	queue  chan poze
+	closed bool
 }
 
-func Ring(size int, opts ...option) (io.ReadWriteCloser, error) {
+func Ring(size int, opts ...option) (io.ReadCloser, io.WriteCloser) {
 	if size <= 0 {
-		return nil, fmt.Errorf("ring: invalid size")
+		size = DefaultBufferSize
 	}
 	r := ring{
 		buffer: make([]byte, size),
+		queue: make(chan poze, DefaultQueueSize),
 	}
 	for _, o := range opts {
 		o(&r)
 	}
-	if r.queue == nil {
-		r.queue = make(chan poze, DefaultQueueSize)
-	}
-	return &r, nil
+	return &r, &r
 }
 
 func (r *ring) Close() error {
 	err := ErrClosed
 	r.once.Do(func() {
 		close(r.queue)
+		r.closed = true
 		err = nil
 	})
 	return err
 }
 
 func (r *ring) Write(xs []byte) (int, error) {
+	if r.closed {
+		return 0, io.EOF
+	}
 	offset, size := r.offset, len(xs)
 
 	if n := copy(r.buffer[offset:], xs); n < size {
@@ -215,21 +204,12 @@ func (r *ring) Write(xs []byte) (int, error) {
 	pz := poze{
 		size:    size,
 		offset:  offset,
-		elapsed: r.wait,
 	}
-	if r.wait > 0 {
-		now := time.Now().UTC()
-		if !r.when.IsZero() {
-			pz.elapsed = now.Sub(r.when)
-		}
-		r.when = now
-	}
-	select {
-	case r.queue <- pz:
-		return size, nil
-	default:
-		return 0, ErrClosed
-	}
+	go func() {
+		time.Sleep(r.wait)
+		r.queue <- pz
+	}()
+	return len(xs), nil
 }
 
 func (r *ring) Read(xs []byte) (int, error) {
@@ -251,10 +231,5 @@ func (r *ring) Read(xs []byte) (int, error) {
 			copy(xs[n:], r.buffer[:pz.size-n])
 		}
 	}
-
-	if r.interval > 0 && pz.elapsed > r.interval {
-		pz.elapsed = r.interval
-	}
-	time.Sleep(pz.elapsed)
 	return pz.size, nil
 }
