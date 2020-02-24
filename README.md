@@ -34,7 +34,7 @@ $ duplicate config.toml
 * cert-file: path to certificate pem encoded
 * cert-key: path to key pem encode
 * cert-auth: list of certificates to be used when verifying clients certificate
-* policy:
+* policy: policy for the TLS client authentication
 
 ### table [[route]]
 
@@ -57,7 +57,7 @@ $ duplicate config.toml
 * cert-file: path to certificate pem encoded
 * cert-key: path to key pem encode
 * cert-auth: list of certificates to be used when verifying server certificate
-* insecure:
+* insecure: check the server certificate chain and its hostname
 
 ### example
 
