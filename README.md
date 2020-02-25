@@ -33,6 +33,9 @@ $ duplicate config.toml
   the incoming stream. If the option is not set or set to 0, duplicate uses a
   default value of 8MB
 
+the value of the buffer option should be choosen carefully. Indeed, if the buffer
+is too short, it has been observed that the delay seems to not have any effect.
+
 ### example
 
 ```toml
