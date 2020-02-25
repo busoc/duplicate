@@ -33,8 +33,21 @@ $ duplicate config.toml
   the incoming stream. If the option is not set or set to 0, duplicate uses a
   default value of 8MB
 
-the value of the buffer option should be choosen carefully. Indeed, if the buffer
+The value of the buffer option should be choosen carefully. Indeed, if the buffer
 is too short, it has been observed that the delay seems to not have any effect.
+
+The best way to compute the "ideal" size for the buffer is:
+
+```
+buffer = (packet size * delay in seconds * number of packets per second) + extra margin
+
+eg:
+packet size       = 1316
+delay             = 60s
+number of packets = 100
+
+buffer = 1316 * 60 * 100 = 7896000 bytes (~8MB)
+```
 
 ### example
 
