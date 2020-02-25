@@ -33,7 +33,7 @@ $ duplicate config.toml
   the incoming stream. If the option is not set or set to 0, duplicate uses a
   default value of 8MB
 
-The value of the buffer option should be choosen carefully. Indeed, if the buffer
+:warning: The value of the buffer option should be choosen carefully. Indeed, if the buffer
 size is too short and because it is implemented as ring buffer, it could seems that
 the delay option has no effect.
 
