@@ -34,7 +34,8 @@ $ duplicate config.toml
   default value of 8MB
 
 The value of the buffer option should be choosen carefully. Indeed, if the buffer
-is too short, it has been observed that the delay seems to not have any effect.
+size is too short and because it is implemented as ring buffer, it could seems that
+the delay option has no effect.
 
 The best way to compute the "ideal" size for the buffer is:
 
